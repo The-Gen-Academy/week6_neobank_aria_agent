@@ -1,5 +1,5 @@
-# app.py — Guarded NeoBank ARIA (Streamlit UI)
-# Same UI as neobank-hf, but calls the guarded agent pipeline.
+# app.py — NeoBank ARIA (Streamlit UI)
+# Streamlit workshop UI wired to the intentionally unhardened ARIA agent.
 
 import os
 import base64
@@ -16,12 +16,12 @@ from openai import(
 load_dotenv()
 
 from database import get_connection, init_database, authenticate_by_name
-from agent import invoke_guarded_agent
+from agent import create_aria_agent, invoke_agent
 
 # ── Page config ──
 st.set_page_config(
-    page_title="NeoBank ARIA (Guarded)",
-    page_icon="🛡️",
+    page_title="NeoBank ARIA",
+    page_icon="🏦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -38,7 +38,7 @@ st.markdown("""
         font-size: 13px; color: var(--text-color); margin-bottom: 1.5rem;
     }
     .hint-card {
-        background: #f9f9f7; border: 1px solid #e5e5e0;
+        background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.18);
         border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;
     }
     .badge-easy {
@@ -57,7 +57,7 @@ st.markdown("""
         background: #feeaea; color: #a02020;
     }
     .chat-header {
-        padding: 12px 0; border-bottom: 1px solid #e5e5e0; margin-bottom: 1rem;
+        padding: 12px 0; border-bottom: 1px solid rgba(128,128,128,0.25); margin-bottom: 1rem;
     }
     .chat-header h2 { font-size: 18px; font-weight: 700; color: var(--text-color); margin: 0; }
     .chat-header p { font-size: 12px; color: var(--text-color); margin: 0; }
@@ -241,7 +241,7 @@ ATTACK_HINTS = [
 def render_sidebar():
     """Render sidebar with API key, navigation, user info, and hints."""
     with st.sidebar:
-        st.markdown("### 🛡️ NeoBank ARIA (Guarded)")
+        st.markdown("### 🏦 NeoBank ARIA")
 
         # ── API Key ──
         if "api_key" not in st.session_state:
@@ -292,7 +292,7 @@ def render_sidebar():
             col_logout, col_clear = st.columns(2)
             with col_logout:
                 if st.button("🚪 Logout", use_container_width=True):
-                    for key in ["logged_in", "user_name", "user_id", "account_tier", "messages"]:
+                    for key in ["logged_in", "user_name", "user_id", "account_tier", "messages", "api_key_validated"]:
                         st.session_state.pop(key, None)
                     st.rerun()
             with col_clear:
@@ -304,7 +304,7 @@ def render_sidebar():
         # ── Attack hints (only on chat page) ──
         if "Chat" in page:
             st.markdown("### 🎯 Attack Challenges")
-            st.caption("Try these attacks — the guardrails should block them now.")
+            st.caption("Work through these in order — each level builds on the last.")
 
             for attack in ATTACK_HINTS:
                 badge_class = {
@@ -377,10 +377,10 @@ def render_login(conn):
         """
         <div style="text-align:center; margin-top:3rem; margin-bottom:1rem;">
             <h1 style="font-size:32px; font-weight:700; letter-spacing:-0.5px;">
-                🛡️ NeoBank (Guarded)
+                🏦 NeoBank
             </h1>
             <p style="font-size:14px; color:var(--text-color);">
-                Sign in to speak with ARIA — now protected by NeMo Guardrails
+                Sign in to speak with ARIA, your AI banking assistant
             </p>
         </div>
         """,
@@ -494,7 +494,7 @@ def render_login(conn):
             <p style="
                 text-align:center;
                 font-size:11px;
-                color:#bbb;
+                color:var(--text-color); opacity:0.65;
                 margin-top:1rem;
             ">
                 Gen Academy Security Workshop · NeoBank is fictional
@@ -537,7 +537,7 @@ def render_chat(conn):
     st.markdown(
         f"""
         <div class="chat-header">
-            <h2>🛡️ ARIA — NeoBank Assistant (Guarded)</h2>
+            <h2>💬 ARIA — NeoBank Assistant</h2>
             <p>
                 Logged in as {st.session_state.user_name}
                 · {st.session_state.user_id}
@@ -560,8 +560,7 @@ def render_chat(conn):
     if not st.session_state.messages:
         welcome = (
             f"Hello {st.session_state.user_name}! 👋 "
-            f"I'm **ARIA**, your NeoBank AI assistant — "
-            f"now protected by NeMo Guardrails. "
+            f"I'm **ARIA**, your NeoBank AI assistant. "
             f"I can help you with account queries, card management, "
             f"fund transfers, transaction disputes, and general banking questions."
             f"\n\nWhat can I help you with today?"
@@ -589,21 +588,25 @@ def render_chat(conn):
         ):
             st.markdown(prompt)
 
-        # ── Run guarded ARIA pipeline ──
+        # ── Run intentionally unhardened ARIA agent ──
         with st.chat_message(
             "assistant",
             avatar="🤖",
         ):
             with st.spinner(
-                "ARIA is thinking (with guardrails)..."
+                "ARIA is thinking..."
             ):
                 try:
-                    response = invoke_guarded_agent(
+                    agent_components = create_aria_agent(
                         conn=conn,
-                        user_message=prompt,
                         user_id=st.session_state.user_id,
                         account_tier=st.session_state.account_tier,
                         api_key=api_key,
+                    )
+
+                    response = invoke_agent(
+                        agent_components=agent_components,
+                        user_message=prompt,
                         chat_history=st.session_state.messages[:-1],
                     )
 
