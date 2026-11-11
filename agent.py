@@ -94,7 +94,7 @@ def build_tools(conn):
 def create_aria_agent(conn, user_id: str, account_tier: str, api_key: str):
     """Create ARIA agent components with the given OpenAI API key."""
     llm = ChatOpenAI(
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         temperature=0.3,
         max_tokens=2048,
         api_key=api_key,
@@ -146,12 +146,7 @@ def invoke_agent(agent_components: dict, user_message: str, chat_history: list[d
         response = llm_with_tools.invoke(messages)
     except Exception as e:
         logger.warning(f"[AGENT] Tool-bound call failed: {e}")
-        # Fall back to plain LLM
-        try:
-            response = llm.invoke(messages)
-            return _extract_text(response)
-        except Exception as e2:
-            return f"I apologize, I'm having a technical issue. Please try again.\n\n_Error: {e2}_"
+        return "I apologize, I'm having a technical issue calling the model. Please try again."
 
     # ── Step 2: No tool calls → return text directly ──
     tool_calls = getattr(response, "tool_calls", None) or []
@@ -160,29 +155,24 @@ def invoke_agent(agent_components: dict, user_message: str, chat_history: list[d
         logger.info(f"[AGENT] Direct response: {text[:150]}")
         return text
 
-    # ── Step 3: Execute first tool call ──
-    tc = tool_calls[0]
-    tool_name = tc.get("name", "")
-    tool_args = tc.get("args", {})
-    tool_id = tc.get("id", "")
-
-    logger.info(f"[AGENT] Tool call: {tool_name}({tool_args})")
-
-    if tool_name not in tools_by_name:
-        logger.warning(f"[AGENT] Unknown tool '{tool_name}'")
-        response = llm.invoke(messages)
-        return _extract_text(response)
-
-    try:
-        tool_result = tools_by_name[tool_name].invoke(tool_args)
-    except Exception as e:
-        tool_result = f"Tool error: {e}"
-
-    logger.info(f"[AGENT] Tool result: {len(str(tool_result))} chars")
-
-    # ── Step 4: Final response (without tools — prevents self-correction) ──
+    # Every tool call must receive a matching ToolMessage, including failures.
     messages.append(response)
-    messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+    for tc in tool_calls:
+        tool_name = tc.get("name", "")
+        tool_args = tc.get("args", {})
+        tool_id = tc.get("id", "")
+        logger.info(f"[AGENT] Tool call: {tool_name}({tool_args})")
+        if tool_name not in tools_by_name:
+            tool_result = f"Tool error: Unknown tool '{tool_name}'"
+        else:
+            try:
+                tool_result = tools_by_name[tool_name].invoke(tool_args)
+            except Exception as e:
+                tool_result = f"Tool error: {e}"
+        logger.info(f"[AGENT] Tool result: {len(str(tool_result))} chars")
+        messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+
+    # One tool batch per user turn; the final model call formats the results.
 
     try:
         final = llm.invoke(messages)
@@ -190,8 +180,8 @@ def invoke_agent(agent_components: dict, user_message: str, chat_history: list[d
         logger.info(f"[AGENT] Final: {text[:150]}")
         return text
     except Exception as e:
-        logger.warning(f"[AGENT] Final call failed, returning raw result: {e}")
-        return str(tool_result)
+        logger.warning(f"[AGENT] Final call failed: {e}")
+        return "I apologize, I'm having a technical issue generating the response. Please try again."
 
 
 def _extract_text(response) -> str:
